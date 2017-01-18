@@ -3,6 +3,7 @@ import itertools
 import gym
 import numpy as np
 import tensorflow as tf
+import pyrsistent
 
 #### Helper functions
 
@@ -87,8 +88,8 @@ velig_a     = tf.slice(velig, [tf.squeeze(ta), 0], [1, N_weights_per_a])
 update_elig = tf.scatter_update(velig, [ta],
                     tf.add(tf.mul(lmbda, velig_a), tf.squeeze(tphio)))
 
-ptpQoa = tf.placeholder(tf.float64, shape=[1])
-loss            = tf.mul(tf.sub(tpQpopa, tf.add(tr, ptpQoa)), velig_a)
+ptpQoa = tf.placeholder(tf.float64, shape=[], name='ptpQoa')
+loss            = tf.mul(tf.sub(tpQpopa, tf.add(tr, ptpQoa)), velig)
 optimizer       = tf.train.GradientDescentOptimizer(learning_rate=alpha)
 update_model    = optimizer.minimize(loss)
 
@@ -96,51 +97,64 @@ init    = tf.global_variables_initializer()
 
 #### Core algorithm
 
+Timestep = pyrsistent.immutable('o, a, phio')
+
+def think(prev, o, r, done):
+    phio = sess.run(tphio, feed_dict={to: o})
+    if not done:
+        ga, pQall = sess.run([tga, tQall], feed_dict={tphio: phio})
+        if true_with_prob(epsi):
+            a = ga
+        else:
+            a = env.action_space.sample()
+
+        pQoa = pQall[a][0]
+    else:
+        a    = None
+        phio = None
+        pQoa = 0
+
+    if prev is not None:
+        sess.run([update_model], feed_dict={tphipo: prev.phio,
+                                            tpa: prev.a,
+                                            ptpQoa: pQoa,
+                                            tr: r})
+
+        if not done:
+            sess.run([update_elig], feed_dict={ta: a, tphio: phio})
+
+    return a, Timestep(o, a, phio)
+
+
+def wrapup(prev, o, r, done=False):
+    if done:
+        think(prev, o, r, done=True)
+
+    return None
+
+
 with tf.Session() as sess:
     file_writer = tf.summary.FileWriter("tf-logs", sess.graph)
 
     sess.run(init)
 
     for n_episode in xrange(N_episodes):
-        po      = None
-        phipo   = None
-        pa      = None
-        o       = env.reset()
-        r       = 0
-        done    = False
+        previous    = None
+        observation = env.reset()
+        reward      = 0
+        is_done     = False
 
         n_step = 0
         for n_step in xrange(N_max_steps):
-            phio = sess.run(tphio, feed_dict={to: o})
-            if not done:
-                ga, pQall = sess.run([tga, tQall], feed_dict={tphio: phio})
-                if true_with_prob(epsi):
-                    a = ga
-                else:
-                    a = env.action_space.sample()
+            action, previous = think(previous, observation, reward, is_done)
 
-                pQoa = pQall[a]
-            else:
-                a    = None
-                phio = None
-                pQoa = 0
+            observation, reward, is_done, _ = env.step(action)
 
-            if po is not None:
-                sess.run([update_model], feed_dict={tphipo: phipo,
-                                                    ta: a,
-                                                    tpa: pa,
-                                                    ptpQoa: pQoa,
-                                                    tr: r})
-
-                sess.run([update_elig], feed_dict={ta: a, tphio: phio})
-
-            po    = o
-            pa    = a
-            phipo = phio
-
-            o, r, done, _ = env.step(a)
-
-            if done:
+            if is_done:
                 break
+
+        wrapup(previous, observation, reward,
+                done=(is_done and (n_step != N_max_steps - 1)))
+        previous = None
 
         print n_step
