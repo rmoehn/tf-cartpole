@@ -1,4 +1,7 @@
 import itertools
+import sys
+
+sys.path.append("../cartpole")
 
 import gym
 import matplotlib
@@ -11,6 +14,9 @@ import tensorflow as tf
 from tensorflow.python import debug as tf_debug
 import pyrsistent
 
+from hiora_cartpole import fourier_fa
+from hiora_cartpole import linfa
+
 #### Helper functions
 
 def true_with_prob(p):
@@ -21,9 +27,9 @@ def true_with_prob(p):
 
 alpha           = tf.constant(0.001, dtype=tf.float64)
 lmbda           = tf.constant(0.9, dtype=tf.float64)
-epsi            = 0.1
+epsi            = 0
 fourier_order   = 3
-N_episodes      = 400
+N_episodes      = 10
 N_max_steps     = 500
 
 
@@ -59,6 +65,22 @@ def phi(local_to, name=None):
     return tf.cos( tf.mul(tpi, tf.matmul(tC, tnc_o, transpose_b=True)),
                 name=name )
 
+
+#### Set up non-TF algorithm
+
+four_n_weights, four_feature_vec = fourier_fa.make_feature_vec(o_ranges,
+                                        n_acts=2, order=fourier_order)
+experience = linfa.init(lmbda=0.9,
+                    init_alpha=0.001,
+                    is_use_alpha_bounds=False,
+                    epsi=epsi,
+                    feature_vec=four_feature_vec,
+                    n_weights=four_n_weights,
+                    act_space=env.action_space,
+                    theta=None)
+
+Celig = []
+Ctheta = []
 
 #### Set up variables for the algorithm
 
@@ -108,7 +130,14 @@ update_theta    = tf.assign_sub(vtheta, update)
 
 Timestep = pyrsistent.immutable('o, a, phio')
 
+Ttheta = []
+Telig = []
+
 def think(prev, o, r, done):
+    elig, theta = sess.run([velig, vtheta])
+    Ttheta.append(np.hstack(theta))
+    Telig.append(np.hstack(elig))
+
     phio = sess.run(tphio, feed_dict={to: o})
 
     if not done:
@@ -126,6 +155,8 @@ def think(prev, o, r, done):
 
     if prev is not None:
         sess.run(add_to_elig, {tpa: prev.a, tphipo: prev.phio})
+        pQpopa = sess.run(tpQpopa, {tpa: prev.a, tphipo: prev.phio})
+        print "T", pQpopa, r, pQoa
         sess.run(update_theta, feed_dict={tphipo: prev.phio,
                                           tpa: prev.a,
                                           tpQoa: pQoa,
@@ -144,7 +175,6 @@ def wrapup(prev, o, r, done=False):
 
     return None
 
-
 with tf.Session() as sess:
     #sess = tf_debug.LocalCLIDebugWrapperSession(sess)
     #sess.add_tensor_filter("has_inf_or_nan", tf_debug.has_inf_or_nan)
@@ -161,7 +191,14 @@ with tf.Session() as sess:
 
         n_step = 0
         for n_step in xrange(N_max_steps):
+            Celig.append(np.copy(experience.E))
+            Ctheta.append(np.copy(experience.theta))
             action, previous = think(previous, observation, reward, is_done)
+
+            experience, linfa_action = linfa.think(experience, observation,
+                    reward, is_done)
+            #if action != linfa_action:
+                #print "different", n_step
 
             observation, reward, is_done, _ = env.step(action)
 
@@ -170,13 +207,17 @@ with tf.Session() as sess:
 
         wrapup(previous, observation, reward,
                 done=(is_done and (n_step != N_max_steps - 1)))
+        Celig.append(experience.E)
+        Ctheta.append(experience.theta)
+        experience = linfa.wrapup(experience, observation, reward,
+                            done=(is_done and (n_step != N_max_steps - 1)))
         previous = None
 
         if n_episode % 10 == 0:
             summary = sess.run(merged_summary)
             summary_writer.add_summary(summary, n_episode)
 
-        print n_step
+        #print n_step
 
     #theta = sess.run(vtheta)
     #plt.plot(np.hstack(theta))
@@ -185,3 +226,7 @@ with tf.Session() as sess:
     #summary = sess.run(merged_summary)
     #summary_writer.add_summary(merged_summary, 0)
 
+nCelig = np.array(Celig)
+nTelig = np.array(Telig)
+nCtheta = np.array(Ctheta)
+nTtheta = np.array(Ttheta)
