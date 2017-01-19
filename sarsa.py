@@ -95,8 +95,10 @@ vthetapa    = tf.slice(vtheta, [tf.squeeze(tpa), 0], [1, N_weights_per_a])
 tpQpopa     = tf.squeeze( tf.matmul(vthetapa, tphipo, name='tpQpopa') )
 
 velig_a     = tf.slice(velig, [tf.squeeze(ta), 0], [1, N_weights_per_a])
-update_elig = tf.scatter_update(velig, [ta],
-                    lmbda * velig_a + tf.squeeze(tphio))
+#update_elig = tf.scatter_update(velig, [ta],
+#                    lmbda * velig_a + tf.squeeze(tphio))
+add_to_elig = tf.scatter_add(velig, [tpa], tf.transpose(tphipo))
+degrade_elig = velig.assign(lmbda * velig)
 
 update          = alpha * (tpQpopa - (tr + tpQoa)) * velig
 update_theta    = tf.assign_sub(vtheta, update)
@@ -123,13 +125,15 @@ def think(prev, o, r, done):
         pQoa = 0
 
     if prev is not None:
-        sess.run([update_theta], feed_dict={tphipo: prev.phio,
-                                            tpa: prev.a,
-                                            tpQoa: pQoa,
-                                            tr: r})
+        sess.run(add_to_elig, {tpa: prev.a, tphipo: prev.phio})
+        sess.run(update_theta, feed_dict={tphipo: prev.phio,
+                                          tpa: prev.a,
+                                          tpQoa: pQoa,
+                                          tr: r})
 
-        if not done:
-            sess.run([update_elig], feed_dict={ta: a, tphio: phio})
+        sess.run(degrade_elig)
+        #if not done:
+            #sess.run([update_elig], feed_dict={ta: a, tphio: phio})
 
     return a, Timestep(o, a, phio)
 
