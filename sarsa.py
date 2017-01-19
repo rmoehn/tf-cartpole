@@ -3,9 +3,11 @@ import itertools
 import gym
 import matplotlib
 matplotlib.use('GTK3Agg')
+# pylint: disable=unused-import
 from matplotlib import pyplot as plt
 import numpy as np
 import tensorflow as tf
+# pylint: disable=unused-import
 from tensorflow.python import debug as tf_debug
 import pyrsistent
 
@@ -54,7 +56,8 @@ tpi             = tf.constant(np.pi, dtype=tf.float64)
 def phi(local_to, name=None):
     tnc_o = tf.div( tf.subtract(local_to, tlow), to_ranges_diff)
         # normalized, centered
-    return tf.cos( tf.mul(tpi, tf.matmul(tC, tf.transpose(tnc_o))), name=name )
+    return tf.cos( tf.mul(tpi, tf.matmul(tC, tnc_o, transpose_b=True)),
+                name=name )
 
 
 #### Set up variables for the algorithm
@@ -86,18 +89,17 @@ tQall       = tf.matmul(vtheta, tphio)
 tga         = tf.squeeze( tf.argmax(tQall, axis=0) )
 
 vthetaa     = tf.slice(vtheta, [tf.squeeze(ta), 0], [1, N_weights_per_a])
-tpQoa       = tf.matmul(vthetaa, tphio, name='tpQoa')
+tpQoa       = tf.squeeze( tf.matmul(vthetaa, tphio, name='tpQoa') )
 
 vthetapa    = tf.slice(vtheta, [tf.squeeze(tpa), 0], [1, N_weights_per_a])
-tpQpopa     = tf.matmul(vthetapa, tphipo, name='tpQpopa')
+tpQpopa     = tf.squeeze( tf.matmul(vthetapa, tphipo, name='tpQpopa') )
 
 velig_a     = tf.slice(velig, [tf.squeeze(ta), 0], [1, N_weights_per_a])
 update_elig = tf.scatter_update(velig, [ta],
-                    tf.add(tf.mul(lmbda, velig_a), tf.squeeze(tphio)))
+                    lmbda * velig_a + tf.squeeze(tphio))
 
-ptpQoa = tf.placeholder(tf.float64, shape=[], name='ptpQoa')
-offset          = tf.mul(tf.sub(tpQpopa, tf.add(tr, ptpQoa)), velig)
-update_theta    = tf.assign_sub(vtheta, tf.mul(alpha, offset))
+update          = alpha * (tpQpopa - (tr + tpQoa)) * velig
+update_theta    = tf.assign_sub(vtheta, update)
 
 
 #### Core algorithm
@@ -106,6 +108,7 @@ Timestep = pyrsistent.immutable('o, a, phio')
 
 def think(prev, o, r, done):
     phio = sess.run(tphio, feed_dict={to: o})
+
     if not done:
         ga, pQall = sess.run([tga, tQall], feed_dict={tphio: phio})
         if true_with_prob(epsi):
@@ -122,7 +125,7 @@ def think(prev, o, r, done):
     if prev is not None:
         sess.run([update_theta], feed_dict={tphipo: prev.phio,
                                             tpa: prev.a,
-                                            ptpQoa: pQoa,
+                                            tpQoa: pQoa,
                                             tr: r})
 
         if not done:
