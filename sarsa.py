@@ -1,8 +1,12 @@
 import itertools
 
 import gym
+import matplotlib
+matplotlib.use('GTK3Agg')
+from matplotlib import pyplot as plt
 import numpy as np
 import tensorflow as tf
+from tensorflow.python import debug as tf_debug
 import pyrsistent
 
 #### Helper functions
@@ -55,8 +59,11 @@ def phi(local_to, name=None):
 
 #### Set up variables for the algorithm
 
-vtheta  = tf.Variable(tf.zeros([N_acts, N_weights_per_a], dtype=tf.float64))
+vtheta  = tf.Variable(tf.zeros([N_acts, N_weights_per_a], dtype=tf.float64),
+                        name="theta")
+#tf.summary.histogram("vtheta", vtheta)
 velig   = tf.Variable(tf.zeros([N_acts, N_weights_per_a], dtype=tf.float64))
+tf.summary.histogram("velig", velig)
 
 
 #### Set up placeholders for the algorithm
@@ -89,11 +96,9 @@ update_elig = tf.scatter_update(velig, [ta],
                     tf.add(tf.mul(lmbda, velig_a), tf.squeeze(tphio)))
 
 ptpQoa = tf.placeholder(tf.float64, shape=[], name='ptpQoa')
-loss            = tf.mul(tf.sub(tpQpopa, tf.add(tr, ptpQoa)), velig)
-optimizer       = tf.train.GradientDescentOptimizer(learning_rate=alpha)
-update_model    = optimizer.minimize(loss)
+offset          = tf.mul(tf.sub(tpQpopa, tf.add(tr, ptpQoa)), velig)
+update_theta    = tf.assign_sub(vtheta, tf.mul(alpha, offset))
 
-init    = tf.global_variables_initializer()
 
 #### Core algorithm
 
@@ -115,7 +120,7 @@ def think(prev, o, r, done):
         pQoa = 0
 
     if prev is not None:
-        sess.run([update_model], feed_dict={tphipo: prev.phio,
+        sess.run([update_theta], feed_dict={tphipo: prev.phio,
                                             tpa: prev.a,
                                             ptpQoa: pQoa,
                                             tr: r})
@@ -134,8 +139,11 @@ def wrapup(prev, o, r, done=False):
 
 
 with tf.Session() as sess:
-    file_writer = tf.summary.FileWriter("tf-logs", sess.graph)
-
+    #sess = tf_debug.LocalCLIDebugWrapperSession(sess)
+    #sess.add_tensor_filter("has_inf_or_nan", tf_debug.has_inf_or_nan)
+    summary_writer  = tf.summary.FileWriter("tf-logs", sess.graph)
+    merged_summary  = tf.summary.merge_all()
+    init            = tf.global_variables_initializer()
     sess.run(init)
 
     for n_episode in xrange(N_episodes):
@@ -157,4 +165,16 @@ with tf.Session() as sess:
                 done=(is_done and (n_step != N_max_steps - 1)))
         previous = None
 
+        if n_episode % 10 == 0:
+            summary = sess.run(merged_summary)
+            summary_writer.add_summary(summary, n_episode)
+
         print n_step
+
+    #theta = sess.run(vtheta)
+    #plt.plot(np.hstack(theta))
+    #plt.show()
+
+    #summary = sess.run(merged_summary)
+    #summary_writer.add_summary(merged_summary, 0)
+
