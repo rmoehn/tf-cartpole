@@ -1,5 +1,6 @@
 import itertools
 import sys
+import time
 
 sys.path.append("../cartpole")
 
@@ -26,7 +27,7 @@ alpha           = tf.constant(0.001, dtype=tf.float64)
 lmbda           = tf.constant(0.9, dtype=tf.float64)
 epsi            = 0.1
 fourier_order   = 3
-N_episodes      = 100
+N_episodes      = 400
 N_max_steps     = 500
 
 
@@ -150,10 +151,12 @@ def wrapup(prev, o, r, done=False):
 with tf.Session() as sess:
     #sess = tf_debug.LocalCLIDebugWrapperSession(sess)
     #sess.add_tensor_filter("has_inf_or_nan", tf_debug.has_inf_or_nan)
-    summary_writer  = tf.summary.FileWriter("tf-logs", sess.graph)
-    merged_summary  = tf.summary.merge_all()
+    #summary_writer  = tf.summary.FileWriter("tf-logs", sess.graph)
+    #merged_summary  = tf.summary.merge_all()
     init            = tf.global_variables_initializer()
     sess.run(init)
+
+    t1 = time.time()
 
     for n_episode in xrange(N_episodes):
         previous    = None
@@ -174,8 +177,12 @@ with tf.Session() as sess:
                 done=(is_done and (n_step != N_max_steps - 1)))
         previous = None
 
-        if n_episode % 10 == 0:
-            summary = sess.run(merged_summary)
-            summary_writer.add_summary(summary, n_episode)
+        #if n_episode % 10 == 0:
+            #summary = sess.run(merged_summary)
+            #summary_writer.add_summary(summary, n_episode)
 
         print n_step
+
+    t2 = time.time()
+
+    print "time %s" % (t2 - t1)
