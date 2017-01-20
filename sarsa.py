@@ -27,9 +27,9 @@ def true_with_prob(p):
 
 alpha           = tf.constant(0.001, dtype=tf.float64)
 lmbda           = tf.constant(0.9, dtype=tf.float64)
-epsi            = 0
+epsi            = 0.1
 fourier_order   = 3
-N_episodes      = 10
+N_episodes      = 100
 N_max_steps     = 500
 
 
@@ -87,7 +87,8 @@ Ctheta = []
 vtheta  = tf.Variable(tf.zeros([N_acts, N_weights_per_a], dtype=tf.float64),
                         name="theta")
 #tf.summary.histogram("vtheta", vtheta)
-velig   = tf.Variable(tf.zeros([N_acts, N_weights_per_a], dtype=tf.float64))
+telig_zeroes    = tf.zeros([N_acts, N_weights_per_a], dtype=tf.float64)
+velig           = tf.Variable(telig_zeroes)
 tf.summary.histogram("velig", velig)
 
 
@@ -107,8 +108,8 @@ tpa     = tf.placeholder(tf.int32, shape=[])
 tphio   = phi(to, name="to")
 tphipo  = phi(tpo, name="tpo")
 
-tQall       = tf.matmul(vtheta, tphio)
-tga         = tf.squeeze( tf.argmax(tQall, axis=0) )
+tQall       = tf.squeeze(tf.transpose(tf.matmul(vtheta, tphio)))
+tga         = tf.argmax(tQall, axis=0)
 
 vthetaa     = tf.slice(vtheta, [tf.squeeze(ta), 0], [1, N_weights_per_a])
 tpQoa       = tf.squeeze( tf.matmul(vthetaa, tphio, name='tpQoa') )
@@ -121,6 +122,7 @@ velig_a     = tf.slice(velig, [tf.squeeze(ta), 0], [1, N_weights_per_a])
 #                    lmbda * velig_a + tf.squeeze(tphio))
 add_to_elig = tf.scatter_add(velig, [tpa], tf.transpose(tphipo))
 degrade_elig = velig.assign(lmbda * velig)
+reset_elig  = velig.assign(telig_zeroes)
 
 update          = alpha * (tpQpopa - (tr + tpQoa)) * velig
 update_theta    = tf.assign_sub(vtheta, update)
@@ -142,12 +144,15 @@ def think(prev, o, r, done):
 
     if not done:
         ga, pQall = sess.run([tga, tQall], feed_dict={tphio: phio})
-        if true_with_prob(epsi):
+        if np.all(pQall == 0):
+            a = 0 # Consistent with my non-TF Sarsa(lambda).
+        elif not true_with_prob(epsi):
+            #print "TpQall", pQall,
             a = ga
         else:
             a = env.action_space.sample()
 
-        pQoa = pQall[a][0]
+        pQoa = pQall[a]
     else:
         a    = None
         phio = None
@@ -156,7 +161,7 @@ def think(prev, o, r, done):
     if prev is not None:
         sess.run(add_to_elig, {tpa: prev.a, tphipo: prev.phio})
         pQpopa = sess.run(tpQpopa, {tpa: prev.a, tphipo: prev.phio})
-        print "T", pQpopa, r, pQoa
+        #print "T", a, pQpopa, r, pQoa
         sess.run(update_theta, feed_dict={tphipo: prev.phio,
                                           tpa: prev.a,
                                           tpQoa: pQoa,
@@ -173,7 +178,10 @@ def wrapup(prev, o, r, done=False):
     if done:
         think(prev, o, r, done=True)
 
+    sess.run(reset_elig)
     return None
+
+actions = []
 
 with tf.Session() as sess:
     #sess = tf_debug.LocalCLIDebugWrapperSession(sess)
@@ -197,8 +205,9 @@ with tf.Session() as sess:
 
             experience, linfa_action = linfa.think(experience, observation,
                     reward, is_done)
+            actions.append((action, linfa_action))
             #if action != linfa_action:
-                #print "different", n_step
+                #print "different", n_step, action, linfa_action
 
             observation, reward, is_done, _ = env.step(action)
 
@@ -217,7 +226,7 @@ with tf.Session() as sess:
             summary = sess.run(merged_summary)
             summary_writer.add_summary(summary, n_episode)
 
-        #print n_step
+        print n_step
 
     #theta = sess.run(vtheta)
     #plt.plot(np.hstack(theta))
